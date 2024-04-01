@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import torch.optim as optim
 import math
 import memory_recall
+import model
 
 class Agent():
     def __init__(self, BATCH_SIZE, MEMORY_SIZE, GAMMA, input_dim, output_dim, action_dim, action_dict, EPS_START, EPS_END, EPS_DECAY_VALUE, lr, TAU, network_type='DDQN') -> None:
@@ -24,6 +25,14 @@ class Agent():
         self.episode_durations = []
         self.cache_recall = memory_recall.MemoryRecall(memory_size=MEMORY_SIZE)
         self.network_type = network_type
+
+        self.policy_net = model.DQN(input_dim=input_dim, output_dim=output_dim, network_type=network_type).to(self.device)
+        self.target_net = model.DQN(input_dim=input_dim, output_dim=output_dim, network_type=network_type).to(self.device)
+        for param in self.target_net.parameters():
+            param.requires_grad = False
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+        self.optimizer = optim.AdamW(self.policy_net.parameters(), lr=lr, amsgrad=True)
+        self.steps_done = 0
 
         
         @torch.no_grad()
