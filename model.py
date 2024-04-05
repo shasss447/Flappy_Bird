@@ -20,7 +20,7 @@ class DQN(torch.nn.Module):
         else:
             self.output = nn.Linear(512, output_dim)
         
-        def forward(self, x):
+    def forward(self, x):
           x = F.relu6(self.layer1(x))
           x = F.relu6(self.layer2(x))
           x = F.relu6(self.layer3(x))

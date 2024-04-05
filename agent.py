@@ -5,7 +5,6 @@ from itertools import count
 import pygame as pg
 import matplotlib.pyplot as plt
 import torch.optim as optim
-import math
 import memory_recall
 import model
 
@@ -35,14 +34,88 @@ class Agent():
         self.steps_done = 0
 
         
-        @torch.no_grad()
-        def take_action(self, state):
-         self.eps = self.eps*self.EPS_DECAY_VALUE
-         self.eps = max(self.eps, self.EPS_END)
-         if self.eps < np.random.rand():
+    @torch.no_grad()
+    def take_action(self, state):
+        self.eps = self.eps*self.EPS_DECAY_VALUE
+        self.eps = max(self.eps, self.EPS_END)
+        if self.eps < np.random.rand():
             state = state[None, :]
             action_idx = torch.argmax(self.policy_net(state), dim=1).item()
-         else:
+        else:
             action_idx = random.randint(0, self.action_dim-1)
-         self.steps_done += 1
-         return action_idx
+        self.steps_done += 1
+        return action_idx
+        
+    def plot_durations(self):
+        plt.figure(1)
+        plt.clf()
+        durations_t = torch.tensor(self.episode_durations, dtype=torch.float)
+        plt.title('Training...')
+        plt.xlabel('Episode')
+        plt.ylabel('Duration')
+        plt.plot(durations_t.numpy())
+        if len(durations_t) >= 100:
+            means = durations_t.unfold(0, 100, 1).mean(1).view(-1)
+            means = torch.cat((torch.zeros(99), means))
+            plt.plot(means.numpy())
+        plt.pause(0.001)
+        plt.savefig(self.network_type+'_training.png')
+
+    def update_target_network(self):
+        target_net_state_dict = self.target_net.state_dict()
+        policy_net_state_dict = self.policy_net.state_dict()
+        for key in policy_net_state_dict:
+            target_net_state_dict[key] = policy_net_state_dict[key]*self.TAU + target_net_state_dict[key]*(1-self.TAU)
+            self.target_net.load_state_dict(target_net_state_dict)
+
+    def optimize_model(self):
+        if len(self.cache_recall) < self.BATCH_SIZE:
+            return
+        batch = self.cache_recall.recall(self.BATCH_SIZE)
+        batch = [*zip(*batch)]
+        state = torch.stack(batch[0])
+        non_final_mask = torch.tensor(tuple(map(lambda s: s is not None, batch[1])), device=self.device, dtype=torch.bool)
+        non_final_next_states = torch.stack([s for s in batch[1] if s is not None])
+        action = torch.stack(batch[2])
+        reward = torch.cat(batch[3])
+        next_state_action_values = torch.zeros(self.BATCH_SIZE, dtype=torch.float32, device=self.device)
+        state_action_values = self.policy_net(state).gather(1, action)
+        with torch.no_grad():
+            next_state_action_values[non_final_mask] = self.target_net(non_final_next_states).max(1)[0]
+        expected_state_action_values = (next_state_action_values * self.GAMMA) + reward
+        loss_fn = torch.nn.SmoothL1Loss()
+        loss = loss_fn(state_action_values, expected_state_action_values.unsqueeze(1))
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+    def train(self, episodes, env):
+        self.steps_done = 0
+        for episode in range(episodes):
+            env.reset_game()
+            state = env.getGameState()
+            state = torch.tensor(list(state.values()), dtype=torch.float32, device=self.device)
+            for c in count():
+                action = self.take_action(state)
+                reward = env.act(self.action_dict[action])
+                reward = torch.tensor([reward], device=self.device)
+                action = torch.tensor([action], device=self.device)
+                next_state = env.getGameState()
+                next_state = torch.tensor(list(next_state.values()), dtype=torch.float32, device=self.device)
+                done = env.game_over()
+                if done:
+                    next_state = None
+                self.cache_recall.cache((state, next_state, action, reward, done))
+                state = next_state
+                self.optimize_model()
+                self.update_target_network()
+                pg.display.update()
+                if done:
+                    self.episode_durations.append(c+1)
+                    self.plot_durations()
+                    print("EPS: {}".format(self.eps))
+                    print("Durations: {}".format(c+1))
+                    print("Score: {}".format(env.score()))
+                    torch.save(self.target_net.state_dict(), self.network_type+'_target_net.pt')
+                    torch.save(self.policy_net.state_dict(), self.network_type+'_policy_net.pt')
+                    break
