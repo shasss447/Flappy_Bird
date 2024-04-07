@@ -22,8 +22,10 @@ class Agent():
         self.TAU = TAU
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.episode_durations = []
+        self.score=[]
         self.cache_recall = memory_recall.MemoryRecall(memory_size=MEMORY_SIZE)
         self.network_type = network_type
+        self.highest_score = 0
 
         self.policy_net = model.DQN(input_dim=input_dim, output_dim=output_dim, network_type=network_type).to(self.device)
         self.target_net = model.DQN(input_dim=input_dim, output_dim=output_dim, network_type=network_type).to(self.device)
@@ -45,21 +47,25 @@ class Agent():
             action_idx = random.randint(0, self.action_dim-1)
         self.steps_done += 1
         return action_idx
-        
-    def plot_durations(self):
-        plt.figure(1)
-        plt.clf()
-        durations_t = torch.tensor(self.episode_durations, dtype=torch.float)
-        plt.title('Training...')
-        plt.xlabel('Episode')
-        plt.ylabel('Duration')
-        plt.plot(durations_t.numpy())
-        if len(durations_t) >= 100:
-            means = durations_t.unfold(0, 100, 1).mean(1).view(-1)
-            means = torch.cat((torch.zeros(99), means))
-            plt.plot(means.numpy())
-        plt.pause(0.001)
-        plt.savefig(self.network_type+'_training.png')
+    
+    def plot_stats(self):
+     plt.figure(figsize=(10, 5))
+     plt.plot(range(1, len(self.score) + 1), self.score, marker='o', linestyle='-')
+     plt.title('Score vs Episode')
+     plt.xlabel('Episode')
+     plt.ylabel('Score')
+     plt.grid(True)
+     plt.savefig('score_vs_episode_plot.png')
+     plt.figure(figsize=(10, 5))
+     plt.plot(range(1, len(self.episode_durations) + 1), self.episode_durations, marker='o', linestyle='-')
+     plt.title('Episode Duration vs Episode')
+     plt.xlabel('Episode')
+     plt.ylabel('Duration')
+     plt.grid(True)
+     plt.savefig('duration_vs_episode_plot.png')
+     plt.show()
+     
+
 
     def update_target_network(self):
         target_net_state_dict = self.target_net.state_dict()
@@ -111,11 +117,14 @@ class Agent():
                 self.update_target_network()
                 pg.display.update()
                 if done:
+                    curr_score = env.score()
                     self.episode_durations.append(c+1)
-                    self.plot_durations()
-                    print("EPS: {}".format(self.eps))
-                    print("Durations: {}".format(c+1))
-                    print("Score: {}".format(env.score()))
+                    self.score.append(curr_score)
+                    print("EPS: ",self.eps)
+                    print("Durations: ",c+1)
+                    print("Score: ",curr_score)
+                    if curr_score > self.highest_score:
+                        self.highest_score = curr_score
                     torch.save(self.target_net.state_dict(), self.network_type+'_target_net.pt')
                     torch.save(self.policy_net.state_dict(), self.network_type+'_policy_net.pt')
                     break
